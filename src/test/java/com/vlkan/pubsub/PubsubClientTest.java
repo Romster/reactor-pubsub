@@ -20,14 +20,7 @@ import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import com.github.tomakehurst.wiremock.junit.WireMockRule;
 import com.vlkan.pubsub.jackson.JacksonHelpers;
-import com.vlkan.pubsub.model.PubsubAckRequest;
-import com.vlkan.pubsub.model.PubsubDraftedMessage;
-import com.vlkan.pubsub.model.PubsubPublishRequest;
-import com.vlkan.pubsub.model.PubsubPublishResponse;
-import com.vlkan.pubsub.model.PubsubPullRequest;
-import com.vlkan.pubsub.model.PubsubPullResponse;
-import com.vlkan.pubsub.model.PubsubPullResponseFixture;
-import com.vlkan.pubsub.model.PubsubReceivedMessage;
+import com.vlkan.pubsub.model.*;
 import io.micrometer.core.instrument.Clock;
 import io.micrometer.prometheus.PrometheusConfig;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
@@ -62,6 +55,9 @@ public class PubsubClientTest {
     private static final String ACK_REQUEST_RELATIVE_PATH =
             PubsubClient.createAckRequestRelativePath(PROJECT_NAME, SUBSCRIPTION_NAME);
 
+    private static final String NACK_REQUEST_RELATIVE_PATH =
+            PubsubClient.createNackRequestRelativePath(PROJECT_NAME, SUBSCRIPTION_NAME);
+
     private static final String PUBLISH_REQUEST_RELATIVE_PATH =
             PubsubClient.createPublishRequestRelativePath(PROJECT_NAME, TOPIC_NAME);
 
@@ -73,6 +69,13 @@ public class PubsubClientTest {
 
     private static final PubsubAckRequest ACK_REQUEST =
             new PubsubAckRequest(PULL_RESPONSE
+                    .getReceivedMessages()
+                    .stream()
+                    .map(PubsubReceivedMessage::getAckId)
+                    .collect(Collectors.toList()));
+
+    private static final PubsubNackRequest NACK_REQUEST =
+            new PubsubNackRequest(PULL_RESPONSE
                     .getReceivedMessages()
                     .stream()
                     .map(PubsubReceivedMessage::getAckId)
@@ -159,6 +162,16 @@ public class PubsubClientTest {
                                         HttpHeaderNames.CONTENT_TYPE.toString(),
                                         HttpHeaderValues.APPLICATION_JSON.toString()))));
 
+        // Stub nack response.
+        serverMockRule.addStubMapping(
+                WireMock.stubFor(WireMock
+                        .post(WireMock.urlEqualTo(NACK_REQUEST_RELATIVE_PATH))
+                        .willReturn(WireMock
+                                .aResponse()
+                                .withHeader(
+                                        HttpHeaderNames.CONTENT_TYPE.toString(),
+                                        HttpHeaderValues.APPLICATION_JSON.toString()))));
+
         // Stub publish response.
         String publishResponseJson = JacksonHelpers.writeValueAsString(PUBLISH_RESPONSE);
         serverMockRule.addStubMapping(
@@ -186,7 +199,7 @@ public class PubsubClientTest {
 
         // Execute random requests to move the statistics.
         for (int trialIndex = 0; trialIndex < 100; trialIndex++) {
-            int operationIndex = trialIndex % 3;
+            int operationIndex = trialIndex % 4;
             switch (operationIndex) {
 
                 // Pull
@@ -208,8 +221,14 @@ public class PubsubClientTest {
                             .block(Duration.ofSeconds(3));
                     break;
 
+                // Nack
+                case 2:
+                    client
+                            .nack(PROJECT_NAME, SUBSCRIPTION_NAME, NACK_REQUEST)
+                            .block(Duration.ofSeconds(3));
+                    break;
                 // Publish
-                case 2: {
+                case 3: {
                     PubsubPublishResponse retrievedPublishResponse = client
                             .publish(PROJECT_NAME, TOPIC_NAME, PUBLISH_REQUEST)
                             .block(Duration.ofSeconds(3));

@@ -19,11 +19,7 @@ package com.vlkan.pubsub;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.module.afterburner.AfterburnerModule;
-import com.vlkan.pubsub.model.PubsubAckRequest;
-import com.vlkan.pubsub.model.PubsubPublishRequest;
-import com.vlkan.pubsub.model.PubsubPublishResponse;
-import com.vlkan.pubsub.model.PubsubPullRequest;
-import com.vlkan.pubsub.model.PubsubPullResponse;
+import com.vlkan.pubsub.model.*;
 import com.vlkan.pubsub.util.MicrometerHelpers;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -198,9 +194,26 @@ public class PubsubClient {
         return ackResponseMono.checkpoint(requestUrl);
     }
 
+    Mono<Void> nack(
+            String projectName,
+            String subscriptionName,
+            PubsubNackRequest nackRequest) {
+        String requestUrl = config.getBaseUrl() + createNackRequestRelativePath(projectName, subscriptionName);
+        Mono<Void> ackResponseMono = meterRegistry == null
+                ? executeRequest(requestUrl, nackRequest, Void.class, config.getAckTimeout())
+                : nackMeasured(projectName, subscriptionName, nackRequest, requestUrl);
+        return ackResponseMono.checkpoint(requestUrl);
+    }
+
     static String createAckRequestRelativePath(String projectName, String subscriptionName) {
         return String.format(
                 "/v1/projects/%s/subscriptions/%s:acknowledge",
+                projectName, subscriptionName);
+    }
+
+    static String createNackRequestRelativePath(String projectName, String subscriptionName) {
+        return String.format(
+                "/v1/projects/%s/subscriptions/%s:modifyAckDeadline",
                 projectName, subscriptionName);
     }
 
@@ -226,6 +239,31 @@ public class PubsubClient {
                         requestUrl,
                         () -> meterTagSupplier.apply(true),
                         ignored -> ackRequest.getAckIds().size(),
+                        mono));
+    }
+
+    private Mono<Void> nackMeasured(
+            String projectName,
+            String subscriptionName,
+            PubsubNackRequest nackRequest,
+            String requestUrl) {
+        Function<Boolean, String[]> meterTagSupplier =
+                createMeterTagSupplier(projectName, "subscriptionName", subscriptionName);
+        return executeRequest(requestUrl, nackRequest, Void.class, config.getAckTimeout())
+                .transform(mono -> MicrometerHelpers.measureLatency(
+                        meterRegistry,
+                        meterNamePrefix + ".nack.latency",
+                        timerByRequestUrl,
+                        requestUrl,
+                        meterTagSupplier,
+                        mono))
+                .transform(mono -> MicrometerHelpers.measureCount(
+                        meterRegistry,
+                        meterNamePrefix + ".nack.count",
+                        counterByRequestUrl,
+                        requestUrl,
+                        () -> meterTagSupplier.apply(true),
+                        ignored -> nackRequest.getAckIds().size(),
                         mono));
     }
 

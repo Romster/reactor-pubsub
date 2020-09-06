@@ -17,6 +17,7 @@
 package com.vlkan.pubsub;
 
 import com.vlkan.pubsub.model.PubsubAckRequest;
+import com.vlkan.pubsub.model.PubsubNackRequest;
 import com.vlkan.pubsub.model.PubsubPullResponse;
 import com.vlkan.pubsub.model.PubsubReceivedMessage;
 import reactor.core.publisher.Mono;
@@ -83,6 +84,45 @@ public class PubsubAcker {
         return client
                 .ack(config.getProjectName(), config.getSubscriptionName(), ackRequest)
                 .checkpoint("ack");
+    }
+
+    public Mono<Void> nackPullResponse(PubsubPullResponse pullResponse) {
+        Objects.requireNonNull(pullResponse, "pullResponse");
+        return nackMessages(pullResponse.getReceivedMessages());
+    }
+
+    public Mono<Void> nackMessages(List<PubsubReceivedMessage> messages) {
+        Objects.requireNonNull(messages, "messages");
+        List<String> nackIds = messages
+                .stream()
+                .map(PubsubReceivedMessage::getAckId)
+                .collect(Collectors.toList());
+        return nackIds(nackIds);
+    }
+
+    public Mono<Void> nackMessage(PubsubReceivedMessage message) {
+        Objects.requireNonNull(message, "message");
+        String ackId = message.getAckId();
+        return nackId(ackId);
+    }
+
+    private Mono<Void> nackIds(List<String> nackIds) {
+        Objects.requireNonNull(nackIds, "nackIds");
+        PubsubAckRequest ackRequest = new PubsubAckRequest(nackIds);
+        return ack(ackRequest);
+    }
+
+    public Mono<Void> nackId(String ackId) {
+        Objects.requireNonNull(ackId, "nackId");
+        List<String> nackIds = Collections.singletonList(ackId);
+        PubsubAckRequest ackRequest = new PubsubAckRequest(nackIds);
+        return ack(ackRequest);
+    }
+
+    public Mono<Void> nack(PubsubNackRequest nackRequest) {
+        Objects.requireNonNull(nackRequest, "nackRequest");
+        return client
+                .nack(config.getProjectName(), config.getSubscriptionName(), nackRequest);
     }
 
     public static Builder builder() {
